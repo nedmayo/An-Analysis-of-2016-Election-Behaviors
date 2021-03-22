@@ -1,0 +1,189 @@
+---
+title: "An Analysis of 2016 Election Behaviors"
+subtitle: "Stat 155 Final Project Report"
+author: "Ned Mayo"
+date: "Fall 2020"
+output: rmarkdown::github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, error = TRUE)
+library(dplyr) 
+library(readr)
+library(ggplot2)
+library(broom)
+```
+
+```{r}
+Election <- read.csv("election.csv")
+```
+
+# Introduction
+
+The data that will be explored in this analysis deals with the 2016 Election and socio-economic factors relating and/or surrounding it. The 2016 Election is one of the most highly analyzed, criticized, and discussed events in recent American history and continues to dominate pretty much every political dialogue. Experiencing all this has motivated an interest in exploring patterns and underlying behaviors that could potentially explain some of its many outcomes. The following questions result from personal curiosities and unproven observations that the dataset might better illuminate.
+
+1) What are the effects, if any, of total population and percentage of those with less than a college degree in a county on third party voting percentage? 
+
+2) Does having republican winning in 2016 have any relation to voter turnout and/or college education levels? Voter turnout, its suppression, and people choosing not to vote was large talk post-2016 election, so I am wondering if it was actually bigger in states that had republicans win? 
+
+Before those questions can be explored, the context and collection of this data must be addressed. The demographic data was obtained and estimated through the American Community Survey (ACS) which is conducted by the US Census Bureau. The ACS surveys an initial ~3.5 mil households and around 95% of them respond in various forms. Their collection mechanisms appear to result in relatively representative data of American voters and non-voters. MIT Election Data and Science Lab collected the public election data and selected and calculated the county-level data from 2012-2016. The eleciton data should include every voter. Conclusions made using the ACS will be able to be made, but the putting in context potential biases such as non response bias will need to be included in those conclusions.
+
+# Data Visualizations
+
+```{r Multiple Linear Regression Visualization, message = FALSE}
+ElectionSubset1 <- Election %>%
+  filter(lesscollege_pct>= 30) %>%
+  filter(otherpres16_pct<= 30) %>%
+  mutate(quartilePop = ntile(total_population, 4)) %>% 
+  mutate(quartilePop = factor(quartilePop))%>% 
+  mutate(highPop = quartilePop ==4) %>% 
+  mutate(highPop = case_when(highPop == TRUE ~ "Metro Counties",
+                             highPop == FALSE ~ "Rural Counties"))
+
+ElectionMultiMod <- ElectionSubset1 %>%
+   with(lm(otherpres16_pct ~ highPop * lesscollege_pct + white_pct))
+
+augment(ElectionMultiMod) %>%
+  ggplot(aes(y = otherpres16_pct, x = lesscollege_pct, color=as.factor(highPop))) +
+  geom_point(alpha = 0.2, size = .5) +
+  geom_smooth(aes(y = .fitted, group = highPop), size = 1.5) +
+  theme_classic() +
+  labs(x="Less Than College Degree (%)", y = "3rd Party Vote (%)")+
+  scale_color_viridis_d('') +
+  xlim(30, 110)
+```
+
+The visualization contrasts the relationship between percentage of those with less than a college degree and third party voting percentage. Metro Counties are among the top 25% most populous, while the rural counties are in the bottom 75%. While both groups of counties have a negative relationship between 3rd party voting and percentage fo those with less than a college degree, rural counties have a far stronger negative slope. The spread of the points are relatively even with both types of counties having somewhat of a bloom of points vertically-- in the positive direction-- of 3rd party vote.
+
+```{r Logistic Visualization, message = FALSE}
+ElectionSubset2 <- Election %>%
+  filter(voterturnout16_pct<= 100) %>%
+  filter(voterturnout16_pct>= 16) %>%
+  mutate(LessEducated = lesscollege_pct > 81.47567) %>% 
+  mutate(LessEducated = case_when(LessEducated == TRUE ~ "Top 50% Least College Educated",
+                                  LessEducated == FALSE ~ "Top 50% Most College Educated"))
+
+
+ElectionBiModel <- ElectionSubset2 %>%
+  filter(otherpres16_pct <= 31) %>%
+  with(glm(RepWon16 ~ voterturnout16_pct*LessEducated + white_pct, family = binomial))
+
+ElectionBiModel %>%
+  ggplot(aes(x=factor(RepWon16), y = voterturnout16_pct)) +
+  geom_boxplot() +
+  facet_wrap(.~LessEducated) +
+  xlab('Republic Won 2016 (0 = No, 1 = Yes)') +
+  ylab('Voter Turnout 2016 (%)') +
+  theme_classic()
+```
+
+This visualization presents two boxplots realting voter turnout in 2016 and whether or not a republican won that year-- with the two boxplots being the lowest and highest 50% percentages of those in the county with less than a college degree. The model indicates that the top 50% least college educated had lower turnout regardless of outcome. However, within this group, counties that had higher voter turnouts tended to have a republican win more often. The more college educated counties reveal that a higher voter turnout is related to a very slight decrease in whether or not a republican won that county. Each group has a few outliers, but none of these appear extreme enough or influential enough to warrant exclusion. Those that were have already been filtered out, and will be detailed further in this exploration. 
+
+
+# Multiple Linear Regression Model 
+
+The only transformation made to the variables was making total population a categorical variable. This was accomplished by cutting it into the top 25% most populous and 75% least populous and factoring those so they would be treated as categorical variables. Extreme outliers in both less than a college degree percentage and 3rd party voting percentage have been selected out. There are two highly college educated counties in Virginia. In addition, all counties with 3rd party voting rates above 30% have been filtered out. The seven counties that were above that are in Utah, Idaho, and Arizona. While the removal of all of these counties with effect the estimates and predictions slightly, they will not noticiably affect the conclusions from the data. These counties still carry importance, but are extreme enough to complicate the model and visual making if they were included.
+
+
+```{r Multiple Linear Regression}
+ElectionMultiMod %>% 
+  glance()
+```
+
+A look into the r-squared for a model with just percentage of those with less than a college degree and total population shows that these two variables alone cannot explain a large amount of the variance in 3rd party voting. Percentage of white residents, percentage of senior (65+) residents, and median household income for the county were all considered for inclusion. While the inclusion of all three together and in a variety of combinations saw larger increases to the adjusted r-squared, solely adding percentage of white residents to percentage of residents with out a college degree and total population  saw a strong increase to the adjusted r-squared-- a value of 0.221 in comparison to 0.188 with just total population and less than college percent as explanatory variables. This increase in adjusted r-squared means that percentage of white residents is not a redundant variable and the addition of percentage of white residents explains additional variation.
+
+In addition, the p-values for all models tested were extremely low with this final model having a value of 1.02e-166. This shows the probability of getting a test statistic as extreme as the one observed here-- which was 220.5-- is only 1.02e-164%. This extremely low value, paired with a very high test statistic, tells us that there is an extremely low chance we are incorrectly rejecting the null hypothesis that there is not relation between the explanatory variables and the outcome. Additionally, looking to the standard deviation of residuals shows a slight decrease from 2.57 to 2.51-- from initial two explanatory variable to final model, respectively. This change is not enormous, but it does mean this final model should be able to predict the 3rd party voting percentage of a county within 5.02% rather than 5.14%. While only incorporating percentage of white residents, total population, and percentage of less than college educated residents does not explain the most variation out of all potential models, its comparative simplicity makes it the best one. It must also be noted that neither the inclusion of percentage of white residents, total population, or percentage of white residents follow any abnormal causal structure, so interpretations of a model containing the three not require that acknowledgement. 
+
+
+$$E[otherpres16_pct | top25*lesscollegepct, white_pct] = \beta_0 +\beta_1*lesscollegepct + \beta_2*top25 + \\ \beta_3*lesscollegepct*totalpopulation +\beta_4*white_pct$$
+
+```{r Multiple Linear Regression Estimates and Confidence Intervals}
+ElectionMultiMod %>% 
+    tidy()
+ElectionMultiMod %>% 
+  confint()
+```
+
+This model presents a large and interesting difference between metro (25% most populous) and rural (75% least populous) counties. The coefficient for less than college percentage and its interaction with total population is the site of this difference. The slope coefficient for percentage of those with less than a college degree shows that on average, there is a -0.059 decrease in 3rd party voting when college education rates decrease by 1. Backing this up, it's confidence interval-- from -0.076 to -0.041-- says that we can be 95% confident that the interval we have constructed contains the true slope coefficient for percentage of residents with less than a college degree. This interval does not span a wide range, nor does it ever become zero. More simply, it suggests a confidence that this parameter is real and will be negative. The p-value of 8.808e-11 further legitimizes this slope, saying that it is extremely improbable that there is no real relationship. The coefficient for percentage of those with less than a college degree-- along with the slope coefficient for percentage of white residents-- makes up the entire slope of metro counties.
+
+Rural counties are a very different picture. The difference between metro and rural counties is made clear by the inclusion of an interaction term between population and percentage of residents with less than a college degree. Its value of -0.121 represents the average difference in slope between the rural and metro counties. The confidence interval for this-- from -0.143 to -0.097-- shows our 95% confidence that there is a real difference between the slopes of the two types of counties. Its p-value of 4.709e-24 further drives home this conclusion, suggesting that the probability of there being no relationship between this interaction term and 3rd party voting rates is also extremely low. 
+
+```{r Multiple Linear Regression Residuals Visual and Glance, message = FALSE}
+augment(ElectionMultiMod) %>% 
+  ggplot(aes(x=.fitted, y = .resid, color=as.factor(highPop))) + 
+  geom_point()+
+  geom_smooth(se=FALSE)+
+  geom_hline(yintercept = 0)+
+  labs(x="Fitted Less Than College Degree (%)", y = "Residual", color = "")+
+  theme_minimal()
+```
+
+The final model, which again has percentage of white residents, percentage of residents without a college degree, and a total population categorical variable, as detailed somewhat above satisfies evaluations from many angles . Furthermore, the plot above shows the slight curve in the residuals. Metro counties and rural counties both over and underpredict at time, but the range of this is not a large cause of concern in comparison to the range of actual residuals seen. In addition, that visualization does not include percentage of white residents as an explanatory variable. As noted earlier, this prediction error for this model is only about 5.02%. The different values that have been presented to evaluate this final model indicate that there should be little uncertainty of the conclusions made. Obviously, that does not mean that the conclusions will or should indicate causality, but the ones that are actually drawn have strong backing from these analyses.
+
+
+
+# Multiple Logistic Regression Model 
+
+The outcome of whether or not a republican won that county was already restricted to a binary, but has been factored so it is able to be read by in that way. Additionally, the explanatory variable that measures the percentage of those with less than a college degree was cut into halves around the median of 81.47567. These two halves were then factored into categorical variables titled "Top 50% Most College Educated Counties" and "Top 50% Least Educated Counties."
+
+Counties at both extremes of voter turnout were removed. Chattahoochee, GA was removed for an extremely low voter turnout (~16%). At the other end, 4 counties in New Mexico, Colorado, and Texas were removed for voter turnouts over 100%. Why their rates are appear in the dataset as over 100% is still undetermined, but they all had populations under 500 which is likely a factor in their unique and extremely high voter turnout. In addition, all counties with 3rd party voting rates above 30% have been filtered out. The seven counties that were above that are in Utah, Idaho, and Arizona. All of the counties that have been selected out should not have an extreme impact on the conclusions that are made. Their removal did not noticably change any of the values or how they would be evaluated. While the election behaviors seen in the removed counties are important, they unnecessarilly complicate the making of a model and visualizations.
+
+The original model which only included voter turnout in 2016 and the categorical version of percentage of those with less than a college degree had only a 63% accuracy rate. While this is not mean it is worthless, further explanatory variables were considered and modeled to determine a the best model to answer our original question. Percentage of white residents, total population, and unemployment percentage were considered and evaluated. A nested F-test informed us that, among these additional variables, there was valuable new information that could explain variance. Additionally, it produced an extremely low p-value of 2.2e-16 that tells us that we can reject the null hypothesis of the smaller model. To narrow the variables down, their estimates and p-values were looked into; however, all values had extremely low p-values and estimates that did not immediately warrant any of their exclusions. 
+
+From there, false positve, false negative, and accuracy rates were calculated for a variety of variable combinations to determine the most predictive model that is not overly complex to derive conclusions from. While the 5 explanatory model had the highest accuracy rate of ~83%, conclusions would be difficult to make off that many variables. Doing the same tests including unemployment rate and total population separately shows that they both have a comparatively high false negative rate-- about 37.8% and 34.3% respectively-- and weaker sensitivity in comparison to solely including percentage of white residents. 
+
+```{r Multiple Logistic Regression Prediction Barchart and Counts}
+threshold <- 0.87
+
+ElectionBiModel %>% 
+  augment(type.predict = 'response') %>%
+  ggplot(aes(x=factor(RepWon16), y= .fitted)) + 
+  geom_boxplot() + 
+  labs(x = "Republican Won 2016 (0=No, 1=Yes)", y = "Predicted Chance of Republican Winning 2016")
+
+ElectionBiModel %>% 
+  augment(type.predict = 'response') %>%
+  mutate(predictRepWon = .fitted >= threshold) %>%
+  count(RepWon16, predictRepWon)
+```
+
+Seen above is the boxplot of probabilities of a Republican winning with voter turnout, education levels, and percentage of white residents as explanatory variables. While the there are many outliers in the Republican won category, is is pretty clear that this test will be fairly predictive. A clear midpoint in between the bulk of the points in each boxplot was identified-- at around .87-- which is where we are choosing to place the threshold. This means that every point above .87 will be predicted as Republican winning, and everything below is will be predicted as no Republican win. With this, we predict the following rates: 
+
+> False negative rate: P(Predict Y = 0 | Actual Y = 1) = 552/2612 = .211
+
+> False positive rate: P(Predict Y = 1 | Actual Y = 0) = 77/ 487 = .158
+
+> Sensitivity: P(Predict Y = 1 | Actual Y = 1) = 2060/ 2612 = .789
+
+> Specificity: P(Predict Y = 0 | Actual Y = 0) = 410/487 = .842
+
+> Accuracy: P(Predict Y = 1 | Total) = 2470/3099 = .797
+
+You can see clear benefits over the other models attempted-- compare the false negative rates above 30% to this 21.1%. In addition it has a relatively high accuracy, especially considering the original two explanatory variable model had an accuracy of 63%. This model's accuracy of 79.7% is especially strong considering this data captures human behavior, which tends to not be as predictable as hard sciences. Including it in the model has no major drawbacks, since it does not incorporate any redundancy and like the original two explanatory variables follows no atypical causal structure. Believing that this model has clear advantages, we are choosing to go forward with it as the final model. 
+
+
+$$\log(Odds[RepWon16|voterturnout16pct, whitepct, LessEducated = True]) = \beta_0 + \beta_2 + \\ (\beta_1 + \beta_3)* voterturnout16pct + \beta_5*whitepct$$
+$$\log(Odds[RepWon16|voterturnout16pct, whitepct, LessEducated = False]) = \beta_0 + \beta_1 * voterturnout16pct + \beta_4*whitepct $$
+```{r Multiple Logistic Regression Exponentiated Estimates and Tidy Output}
+ElectionBiModel %>% 
+  coef() %>% 
+  exp()
+ElectionBiModel %>% 
+  tidy()
+ElectionBiModel %>%
+  confint() %>%
+  exp()
+```
+The final model, shown above, includes voter turnout in 2016, percentage of white residents, and whether or not a county is in the top or  bottom half of college education levels as explanatory variables for the odds of a Republican winning in 2016. The interaction term between voter turnout and the most college educated counties is slightly misses the 5% cutoff on p-values for rejecting the null hypothesis that the relationship is real. Its exponentiated confidence interval of  0.938 to 1.001 also suggests that its relationship can potentially cross an odds ratio of 1, which means no relationship. Regardless, we are continuing to keep it in the model and are treating it as if it did pass considering it is only marginally more and the vast majority of its confidence interval is a negative odds ratio. It does improve the model's prediction-- 79.7% included and 77.9% excluded. However, its relative importance in the model has decreased significantly. 
+
+Both percentage of white residents and voter turnout percentage are more predictive have a very clear, real relationship, with p-values at 5.174e-115 and 8.209e-06 respectively, rejecting the null hypothesis that their relationships are not real. Additionally, their confidence suggest that we can be very certain that these relationships are real. As percentage of white residents increases by 1, the odds ratio is expected to increase by 1.109. When voter turnout percentage increases by 1, the odds ratio for a Republican to win is supposed to decrease by .911. These two sum to be the slope of the less educated counties, while the interaction term mentioned is the difference in the odds ratio between these counties and the most educated counties.
+
+Again, while the interaction term between college education and voter turnout is not ideal, this model still is very predictive over the odds of a republican winning in a county. Provided the other two explanatory variables and their lack of uncertainty, this model very much allows conclusions to be made. Behavioral modeling is not a hard science, and thus will not have the perfect statistical values to show. That said, there is a lot that is right with this model: high accuracy, mostly high p-values for coefficients, no substantial redundancy, and relatively strong confidence intervals. 
+
+
+
+# Conclusions
+
+Overall in the multiple linear regression model dealing with 3rd party voting outcomes, as the percentage of those with less than a college degree increases, the 3rd party voting is expected to decrease. This takes different forms depending on population with the 75% least populous counties have a much stronger negative relationship than the most populous counties. Despite the more populous counties' weaker relationship, it is still negative, significant, and real. The relationship observed between voter turnout, college education levels, and whether or not a Republican won in 2016 yielded interesting results-- ones that said college education may not be the primary predictors of the odds of a republican winning. Voter turnout and percentage of white residents seems to be far more influential over the odds of a republican winning; however, there is still a difference between the most and least educated counties due to the inclusion of college education levels. 
+
+While these findings are important, the context and potentials for biases present in the dataset, its collection, and its use must be addressed. In comparison to the Election data, The American Community Survey (ACS) has a lot more potential to misrepresent and undercount the ideal population of interest. The non-response bias of about 5% of those initially contacted appears to be the largest potential source of biases in the data. While it is a small number overall, for certain groups and for certain areas this number may be signficiantly higher, thus underrepresenting these bodies of people. Information bias should be unlikely source of concern for this data because it is primarily socio-economic questions that will likely not promote false answers. The questions, however, are limited and do not reflect those who identify with more than one race. Conversely, the Election data should be relatively bias free as the data was generated by the voters themselves. The only role of MIT was in its collection and organization. The collection of this data does not plainly harm anybody in particular. Potentially, its availability can inform political moves such as Gerrymandering that attempts to weaken the vote of other parties. While the collection of the ACS should not harm anybody, it is is collected to determine governmental assistance allocation, planning, and other things that demographic data is needed for, which can benefit those who respond and harm those who are undercounted. The ways I have used this data should not share any of these harms as the scope of who will see this is very small, and should not be used in any decisions that will impact actual lives.
